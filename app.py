@@ -1,14 +1,24 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
 
-# --- 1. 데이터 로드 함수 ---
+# --- 1. 페이지 설정 및 스타일 ---
+st.set_page_config(page_title="Bitcoin Halving Strategy", layout="wide")
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. 데이터 로드 (yfinance 사용) ---
 @st.cache_data(ttl=3600)
-def get_historical_data():
+def get_crypto_data():
     try:
+        # 비트코인 최대 기간 데이터 가져오기
         df = yf.download("BTC-USD", period="max", interval="1d")
         df = df.reset_index()
         df.columns = [c.lower() for c in df.columns]
@@ -16,7 +26,7 @@ def get_historical_data():
     except:
         return pd.DataFrame()
 
-# --- 2. 반감기 및 전략 날짜 설정 ---
+# --- 3. 반감기 및 전략 날짜 설정 ---
 HALVINGS = [
     datetime(2012, 11, 28),
     datetime(2016, 7, 9),
@@ -24,60 +34,56 @@ HALVINGS = [
     datetime(2024, 4, 20)
 ]
 
-# --- 3. 차트 생성 로직 ---
-def create_strategy_chart(df):
+# --- 4. 메인 대시보드 로직 ---
+st.title("₿ Bitcoin Halving 'The Formula' Dashboard")
+df_hist = get_crypto_data()
+
+if not df_hist.empty:
+    # 차트 생성
     fig = go.Figure()
 
-    # 메인 가격 선 (로그 스케일)
+    # 비트코인 가격 선 (로그 스케일 적용 필수)
     fig.add_trace(go.Scatter(
-        x=df['date'], 
-        y=df['close'], 
+        x=df_hist['date'], 
+        y=df_hist['close'], 
         name="BTC Price", 
         line=dict(color='#f39c12', width=2)
     ))
 
-    for h in HALVINGS:
-        # 1. 반감기 본 날짜 (White)
-        fig.add_vline(x=h, line_width=2, line_dash="solid", line_color="white")
-        fig.add_annotation(x=h, y=0, text="Halving", showarrow=False, yref="paper", font=dict(color="white"))
-
-        # 2. H + 18개월 (SELL - Red)
+    # 각 반감기별 수직선 및 구간 표시
+    for i, h in enumerate(HALVINGS):
+        # A. 반감기 본 날짜 (White)
+        fig.add_vline(x=h, line_width=1, line_dash="solid", line_color="rgba(255,255,255,0.5)")
+        
+        # B. 매도 타점: H + 18개월 (Red)
         sell_date = h + relativedelta(months=18)
-        if sell_date < datetime.now() + relativedelta(years=2): # 미래 너무 먼 날짜 방지
+        if sell_date < df_hist['date'].max() + relativedelta(months=6):
             fig.add_vline(x=sell_date, line_width=2, line_dash="dash", line_color="#e74c3c")
-            fig.add_annotation(x=sell_date, y=0.95, text="SELL (H+18)", showarrow=False, yref="paper", font=dict(color="#e74c3c"))
+            fig.add_annotation(x=sell_date, y=0.95, text=f"SELL (H18)", yref="paper", showarrow=False, font=dict(color="#e74c3c"))
 
-        # 3. H + 30개월 (BUY - Green)
+        # C. 매수 타점: H + 30개월 (Green)
         buy_date = h + relativedelta(months=30)
-        if buy_date < datetime.now() + relativedelta(years=2):
+        if buy_date < df_hist['date'].max() + relativedelta(months=12):
             fig.add_vline(x=buy_date, line_width=2, line_dash="dash", line_color="#2ecc71")
-            fig.add_annotation(x=buy_date, y=0.05, text="BUY (H+30)", showarrow=False, yref="paper", font=dict(color="#2ecc71"))
+            fig.add_annotation(x=buy_date, y=0.05, text=f"BUY (H30)", yref="paper", showarrow=False, font=dict(color="#2ecc71"))
 
+    # 차트 레이아웃 설정
     fig.update_layout(
-        title="Bitcoin Strategy: Halving, Sell(H+18), and Buy(H+30)",
-        yaxis_type="log",
+        title="BTC Price History with Halving Strategy Lines",
+        yaxis_type="log", # 로그 스케일
         template="plotly_dark",
-        xaxis_title="Year",
-        yaxis_title="Price (USD)",
         height=600,
-        showlegend=False
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=0, r=0, t=40, b=0)
     )
-    return fig
 
-# --- 4. 메인 실행부 ---
-st.set_page_config(page_title="BTC Strategy Chart", layout="wide")
-st.title("📈 The Formula: Halving Cycle Visualization")
+    st.plotly_chart(fig, use_container_width=True)
 
-df_hist = get_historical_data()
-
-if not df_hist.empty:
-    strategy_fig = create_strategy_chart(df_hist)
-    st.plotly_chart(strategy_fig, use_container_width=True)
-    
+    # 하단 안내 문구
     st.markdown("""
-    - **흰색 실선**: 반감기(Halving) 당일
-    - **빨간색 점선 (H+18)**: 역사적 고점 부근 (매도 시점)
-    - **초록색 점선 (H+30)**: 역사적 저점 부근 (매수 시점)
+    - **흰색 실선**: 비트코인 반감기($H$) 발생일
+    * **빨간 점선 ($H+18$)**: 역사적 가격 정점 구간 (분할 매도 권장)
+    * **초록 점선 ($H+30$)**: 역사적 가격 저점 구간 (분할 매수 권장)
     """)
 else:
-    st.error("데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
+    st.error("데이터를 불러올 수 없습니다. 잠시 후 새로고침 해주세요.")
