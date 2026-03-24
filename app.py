@@ -6,73 +6,84 @@ from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="BTC Cycle Dashboard", layout="wide")
+st.set_page_config(page_title="Bitcoin Halving Strategy", layout="wide")
+st.markdown("<style>.stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; }</style>", unsafe_allow_html=True)
 
-# --- 2. 데이터 로드 함수 (오류 방지 강화) ---
+# --- 2. 데이터 가져오기 (Yahoo Finance 사용 - 훨씬 안정적) ---
 @st.cache_data(ttl=3600)
-def get_crypto_data():
+def get_historical_data():
     try:
-        # Ticker 객체를 통해 개별 데이터 추출 시도
-        data = yf.download("BTC-USD", start="2010-01-01", end=datetime.now().strftime('%Y-%m-%d'), progress=False)
-        if data.empty:
-            return pd.DataFrame()
-        df = data.reset_index()
-        df.columns = [str(c).lower() for c in df.columns]
+        # 비트코인 과거 데이터 가져오기
+        btc = yf.Ticker("BTC-USD")
+        df = btc.history(period="max")
+        df = df.reset_index()
+        df.columns = [c.lower() for c in df.columns]
         return df
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
-# --- 3. 기본 정보 설정 ---
+@st.cache_data(ttl=300)
+def get_live_price():
+    try:
+        btc = yf.Ticker("BTC-USD")
+        return btc.fast_info['last_price']
+    except:
+        return 0.0
+
+# --- 3. 전략 로직 ---
 HALVINGS = [datetime(2012,11,28), datetime(2016,7,9), datetime(2020,5,11), datetime(2024,4,20)]
+CURRENT_H = HALVINGS[-1]
 TODAY = datetime.now()
+diff = relativedelta(TODAY, CURRENT_H)
+months_passed = diff.years * 12 + diff.months
 
-# --- 4. 메인 화면 ---
-st.title("₿ Bitcoin Halving 'The Formula'")
-
-df_hist = get_crypto_data()
-
-# 데이터가 비어있을 경우 예외 처리
-if df_hist.empty:
-    st.error("⚠️ 외부 데이터(Yahoo Finance) 연결에 실패했습니다.")
-    st.info("임시 시세로 대시보드를 표시합니다. 잠시 후 새로고침(F5) 해주세요.")
-    current_price = 95000.0  # 데이터 못 불러올 때 임시 표시 가격
+# Zone 판별
+if months_passed <= 12:
+    zone, color, desc = "HOLDING ZONE", "#3498db", "현금화 준비 중 (H+12까지 관망)"
+elif 12 < months_passed <= 18:
+    zone, color, desc = "SELL ZONE", "#e74c3c", "분할 매도 및 수익 실현 구간"
+elif 18 < months_passed <= 30:
+    zone, color, desc = "CASH ZONE", "#f1c40f", "현금 보유하며 저점 대기 (가장 힘든 기다림)"
 else:
-    current_price = df_hist['close'].iloc[-1]
+    zone, color, desc = "BUY ZONE", "#2ecc71", "적극적 매수 및 수량 확보 구간"
 
-# --- 5. 대시보드 상단 지표 ---
-c1, c2, c3 = st.columns(3)
-c1.metric("Current Price", f"${float(current_price):,.0f}")
-c2.metric("Market Status", "CASH PHASE (WAITING)")
-c3.metric("Next Halving", "~April 2028")
+# --- 4. 화면 구성 ---
+st.title("₿ Bitcoin Halving 'The Formula'")
+live_p = get_live_price()
 
-# --- 6. 차트 구성 ---
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Current Price", f"${live_p:,.0f}")
+c2.metric("Market Status", zone)
+c3.metric("Months since H", f"{months_passed} Mo")
+c4.metric("Next Halving", "~April 2028")
+
+st.info(f"**Current Guidance:** {desc}")
+
+# --- 5. 차트 그리기 ---
+df_hist = get_historical_data()
 if not df_hist.empty:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_hist['date'], y=df_hist['close'], name="BTC", line=dict(color='#f39c12')))
-
+    fig.add_trace(go.Scatter(x=df_hist['date'], y=df_hist['close'], name="BTC Price", line=dict(color='#f39c12')))
+    
     for h in HALVINGS:
-        # Halving (White)
-        fig.add_vline(x=h, line_width=1, line_color="white", opacity=0.5)
-        # SELL (H+18)
-        s_date = h + relativedelta(months=18)
-        fig.add_vline(x=s_date, line_width=2, line_dash="dash", line_color="#e74c3c")
-        # BUY (H+30)
-        b_date = h + relativedelta(months=30)
-        fig.add_vline(x=b_date, line_width=2, line_dash="dash", line_color="#2ecc71")
-
-    fig.update_layout(yaxis_type="log", template="plotly_dark", height=500, title="BTC Log Chart with H+18 & H+30 Lines")
+        fig.add_vline(x=h, line_width=1.5, line_dash="dash", line_color="gray")
+    
+    fig.update_layout(title="BTC All-Time Price (Log Scale)", yaxis_type="log", template="plotly_dark", height=500)
     st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("데이터 로딩 중입니다... 깃허브에서 'Reboot App'을 누르거나 잠시만 기다려주세요.")
 
-# --- 7. 이미지 기반 테이블 데이터 (항상 표시됨) ---
+# --- 6. 이미지 데이터 기반 테이블 ---
 st.divider()
-st.markdown("### 📋 Strategy Performance (The Formula)")
-col_a, col_b = st.columns(2)
-with col_a:
-    st.write("**Every Trade Produced:**")
-    st.table(pd.DataFrame({
-        "Action": ["BUY", "SELL", "BUY", "SELL", "BUY", "SELL"],
-        "Date": ["2015.05", "2018.01", "2019.01", "2021.11", "2022.11", "2025.10 (Exp)"],
-        "BTC Price": ["$237", "$13,500", "$3,500", "$64,000", "$16,500", "$108,000"]
-    }))
+t1, t2 = st.columns(2)
+with t1:
+    st.markdown("### 📋 Every Trade Produced")
+    trades = {"Action": ["BUY", "SELL", "CASH", "BUY", "SELL", "CASH", "BUY", "SELL"],
+              "Date": ["2015.05", "2018.01", "2018-19", "2019.01", "2021.11", "2021-22", "2022.11", "2025.10"],
+              "Price": ["$237", "$13,500", "-", "$3,500", "$64,000", "-", "$16,500", "$108,000"]}
+    st.table(pd.DataFrame(trades))
+
+with t2:
+    st.markdown("### 📊 Strategy vs Buy & Hold")
+    math = {"Entry": ["2015 Bear", "2018 Bear", "2022 Bear"],
+            "Strategy": ["$6,817,689", "$119,688", "$6,545"],
+            "B&H": ["$286,920", "$19,429", "$4,121"]}
+    st.table(pd.DataFrame(math))
