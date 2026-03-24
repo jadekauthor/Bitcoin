@@ -27,7 +27,17 @@ def get_historical_data():
 @st.cache_data(ttl=60) # 실시간 시세는 1분마다
 def get_live_data():
     url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true"
-    return requests.get(url).json()['bitcoin']
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if 'bitcoin' in data:
+            return data['bitcoin']
+        else:
+            # 데이터가 없을 경우 기본값 반환
+            return {"usd": 0, "usd_24h_change": 0, "total_volume": 0, "market_cap_rank": 0}
+    except Exception as e:
+        # 에러 발생 시 기본값 반환
+        return {"usd": 0, "usd_24h_change": 0, "total_volume": 0, "market_cap_rank": 0}
 
 # --- 3. 반감기 데이터 및 로직 ---
 HALVINGS = [
