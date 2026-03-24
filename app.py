@@ -19,10 +19,28 @@ st.markdown("""
 def get_historical_data():
     url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
     params = {"vs_currency": "usd", "days": "max", "interval": "daily"}
-    res = requests.get(url, params=params).json()
-    df = pd.DataFrame(res['prices'], columns=['timestamp', 'price'])
-    df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
-    return df
+    try:
+        res = requests.get(url, params=params).json()
+        if 'prices' in res:
+            df = pd.DataFrame(res['prices'], columns=['timestamp', 'price'])
+            df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
+            return df
+        else:
+            # 데이터가 없을 경우 빈 데이터프레임 반환
+            return pd.DataFrame(columns=['date', 'price'])
+    except Exception as e:
+        return pd.DataFrame(columns=['date', 'price'])
+
+# 메인 로직 부분 (df_hist 사용처) 에러 방지
+df_hist = get_historical_data()
+
+if not df_hist.empty:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df_hist['date'], y=df_hist['price'], name="BTC Price", line=dict(color='#f39c12')))
+    # ... (기존 차트 설정 코드) ...
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("차트 데이터를 불러올 수 없습니다. 잠시 후 새로고침 해주세요.")
 
 @st.cache_data(ttl=60) # 실시간 시세는 1분마다
 def get_live_data():
